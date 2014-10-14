@@ -177,7 +177,9 @@ NSString *const COMMAND = @"cmd";
 NSString *const OPTION = @"alt";
 NSString *const SHIFT = @"shift";
 NSString *const FUNCTION = @"fn";
+NSString *const HYPER = @"hyper";
 UInt32 const FUNCTION_KEY = 0x800000;
+UInt32 const HYPER_KEY = 1 << 14; // rightOptionKeyBit;
 
 // Expression Keys
 NSString *const SCREEN_ORIGIN_X = @"screenOriginX";

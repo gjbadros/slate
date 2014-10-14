@@ -49,6 +49,8 @@
   DeleteSnapshotOperation *undoDeleteSnapshotOperation;
   NSInteger cmdTabBinding;
   NSInteger cmdShiftTabBinding;
+  BOOL hyperKeyBinding; // track whether we've seen a hyper binding
+  NSMutableDictionary *hyperKeycodesToId;
   NSMutableDictionary *modalHotKeyRefs;
   NSMutableDictionary *modalIdToKey;
   NSString *currentModalKey;
@@ -65,6 +67,8 @@
 @property DeleteSnapshotOperation *undoDeleteSnapshotOperation;
 @property (assign) NSInteger cmdTabBinding;
 @property (assign) NSInteger cmdShiftTabBinding;
+@property (assign) BOOL hyperKeyBinding;
+@property NSMutableDictionary *hyperKeycodesToId;
 @property NSMutableDictionary *modalHotKeyRefs;
 @property NSMutableDictionary *modalIdToKey;
 @property NSString *currentModalKey;

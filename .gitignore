@@ -13,3 +13,6 @@ Slate.xcodeproj/xcuserdata/jigish.xcuserdatad/
 # don't version xcode artifacts
 *.xcuserdatad
 tmp
+.DS_Store
+Slate.xcodeproj/project.xcworkspace/xcshareddata/
+

@@ -23,6 +23,7 @@ extern NSString *const SNAPSHOTS_FILE;
 #define MODAL_BEGIN_ID 20000;
 #define CURRENT_MODAL_BEGIN_ID 30000;
 extern NSInteger const MODAL_ESCAPE_ID;
+#define HYPER_ADDITIVE_ID 40000
 
 // Directive Keys
 extern NSString *const BIND;
@@ -177,7 +178,9 @@ extern NSString *const COMMAND;
 extern NSString *const OPTION;
 extern NSString *const SHIFT;
 extern NSString *const FUNCTION;
+extern NSString *const HYPER;
 extern UInt32 const FUNCTION_KEY;
+extern UInt32 const HYPER_KEY;
 
 // Expression Keys
 extern NSString *const SCREEN_ORIGIN_X;

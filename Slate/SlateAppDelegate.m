@@ -37,7 +37,8 @@
 @implementation SlateAppDelegate
 
 @synthesize currentHintOperation, currentGridOperation, currentSwitchBinding, menuSnapshotOperation;
-@synthesize menuActivateSnapshotOperation, cmdTabBinding, cmdShiftTabBinding, modalHotKeyRefs, modalIdToKey;
+@synthesize menuActivateSnapshotOperation, cmdTabBinding, cmdShiftTabBinding,modalHotKeyRefs, modalIdToKey;
+@synthesize hyperKeycodesToId, hyperKeyBinding;
 @synthesize currentModalKey, currentModalHotKeyRefs, undoSnapshotOperation, undoDeleteSnapshotOperation, hasUndoOperation;
 
 static NSObject *timerLock = nil;
@@ -46,6 +47,50 @@ static NSTimer *currentTimer = nil;
 static EventHotKeyID currentHotKey;
 static SlateAppDelegate *selfRef = nil;
 static EventHandlerRef modifiersEvent;
+
+
+static NSString *KeyFromKeycodeFlags(int64_t keyCode, uint64_t flags) {
+  const char *shift = "*";
+  const char *alt = "*"; // cmd
+  const char *ctrl = "*";
+  const char *opt = "*";
+  if (flags & kCGEventFlagMaskCommand) {
+    alt = "cmd";
+  }
+  if (flags & kCGEventFlagMaskControl) {
+    ctrl = "ctrl";
+  }
+  if (flags & kCGEventFlagMaskAlternate && !(flags &NX_DEVICERALTKEYMASK)) {
+    opt = "opt";
+  }
+  if (flags & kCGEventFlagMaskShift) {
+    shift = "shift";
+  }
+  return [NSString stringWithFormat: @"%lld-%s-%s-%s-%s",
+          keyCode, shift, alt, ctrl, opt];
+}
+
+static NSString *KeyFromKeycodeModifiers(int64_t keyCode, UInt32 modifiers) {
+  const char *shift = "*";
+  const char *alt = "*"; // cmd
+  const char *ctrl = "*";
+  const char *opt = "*";
+  if (modifiers & optionKey) {
+    opt = "opt";
+  }
+  if (modifiers & shiftKey) {
+    shift = "shift";
+  }
+  if (modifiers & controlKey) {
+    ctrl = "ctrl";
+  }
+  if (modifiers & cmdKey) {
+    alt = "cmd";
+  }
+  return [NSString stringWithFormat: @"%lld-%s-%s-%s-%s",
+          keyCode, shift, alt, ctrl, opt];
+}
+
 
 - (IBAction)updateLaunchState {
   if ([launchOnLoginItem state] == NSOnState) {
@@ -106,22 +151,42 @@ static EventHandlerRef modifiersEvent;
 
   NSMutableArray *bindings = [[SlateConfig getInstance] bindings];
 
+  if ([bindings count] >= 9999) {
+    SlateLogger(@"ERROR - More than 10,000 bindings will cause problems with hyper bindings");
+  }
+  
   for (NSInteger i = 0; i < [bindings count]; i++) {
     Binding *binding = [bindings objectAtIndex:i];
-    SlateLogger(@"REGISTERING KEY: %u, MODIFIERS: %u", [binding keyCode], [binding modifiers]);
-    if ([binding keyCode] == 48 && [binding modifiers] == cmdKey) {
+    UInt32 modifiers = [binding modifiers];
+    if (modifiers & HYPER_KEY) {
+      if (!hyperKeyBinding) {
+        SlateLogger(@"Found first hyper key binding");
+        hyperKeyBinding = true;
+      }
+    }
+    NSInteger hotkey_id = (UInt32)i + ((modifiers & rightOptionKey)? HYPER_ADDITIVE_ID: 0);
+    SlateLogger(@"REGISTERING KEY: %u, MODIFIERS: %u [hotkeyid %li]", [binding keyCode], modifiers, hotkey_id);
+    if ([binding keyCode] == 48 && modifiers == cmdKey) {
       cmdTabBinding = i;
       SlateLogger(@"Found CMD+Tab binding!");
-    } else if ([binding keyCode] == 48 && [binding modifiers] == (cmdKey + shiftKey)) {
+    } else if ([binding keyCode] == 48 && modifiers == (cmdKey + shiftKey)) {
       cmdShiftTabBinding = i;
       SlateLogger(@"Found CMD+Shift+Tab binding!");
     }
     EventHotKeyID myHotKeyID;
     EventHotKeyRef myHotKeyRef;
-    myHotKeyID.signature = *[[NSString stringWithFormat:@"hotkey%li",i] cStringUsingEncoding:NSASCIIStringEncoding];
-    myHotKeyID.id = (UInt32)i;
-    RegisterEventHotKey([binding keyCode], [binding modifiers], myHotKeyID, GetEventMonitorTarget(), 0, &myHotKeyRef);
-    [binding setHotKeyRef:myHotKeyRef];
+    // indicate hyper key bindings by starting at 40,000
+    myHotKeyID.signature = *[[NSString stringWithFormat:@"hotkey%li",hotkey_id] cStringUsingEncoding:NSASCIIStringEncoding];
+    myHotKeyID.id = (UInt32) hotkey_id;
+    if (modifiers & HYPER_KEY) {
+      NSString *key = KeyFromKeycodeModifiers([binding keyCode], modifiers);
+      [[self hyperKeycodesToId]
+          setObject:[NSNumber numberWithInteger:hotkey_id]
+             forKey:key ];
+    } else {
+      RegisterEventHotKey([binding keyCode], modifiers, myHotKeyID, GetEventMonitorTarget(), 0, &myHotKeyRef);
+      [binding setHotKeyRef:myHotKeyRef];
+    }
   }
 
   NSArray *modalKeys = [[[SlateConfig getInstance] modalBindings] allKeys];
@@ -134,9 +199,18 @@ static EventHandlerRef modifiersEvent;
     EventHotKeyRef myHotKeyRef;
     myHotKeyID.signature = *[[NSString stringWithFormat:@"hotkey%li",i] cStringUsingEncoding:NSASCIIStringEncoding];
     myHotKeyID.id = (UInt32)i;
-    RegisterEventHotKey([[modalKeyArr objectAtIndex:0] unsignedIntValue], [[modalKeyArr objectAtIndex:1] unsignedIntValue], myHotKeyID, GetEventMonitorTarget(), 0, &myHotKeyRef);
-    [[self modalHotKeyRefs] setObject:[NSValue valueWithPointer:myHotKeyRef] forKey:modalHashKey];
-    [[self modalIdToKey] setObject:modalHashKey forKey:[NSNumber numberWithInteger:i]];
+    UInt32 modifiers = [[modalKeyArr objectAtIndex:1] unsignedIntValue];
+    NSInteger hotkey_id = (UInt32)i + ((modifiers & rightOptionKey)? HYPER_ADDITIVE_ID: 0);
+    if (modifiers & HYPER_KEY) {
+      SlateLogger(@"Skipping RegisterEventHotKey for modal hyper binding");
+      NSString *key = KeyFromKeycodeModifiers([[modalKeyArr objectAtIndex:0] unsignedIntValue], modifiers);
+      [[self hyperKeycodesToId]
+          setObject:[NSNumber numberWithInteger:hotkey_id] forKey:key ];
+    } else {
+      RegisterEventHotKey([[modalKeyArr objectAtIndex:0] unsignedIntValue], modifiers, myHotKeyID, GetEventMonitorTarget(), 0, &myHotKeyRef);
+      [[self modalHotKeyRefs] setObject:[NSValue valueWithPointer:myHotKeyRef] forKey:modalHashKey];
+    }
+    [[self modalIdToKey] setObject:modalHashKey forKey:[NSNumber numberWithInteger:hotkey_id]];
     i++;
   }
   SlateLogger(@"HotKeys registered.");
@@ -253,7 +327,12 @@ static EventHandlerRef modifiersEvent;
     }
   }
 
-  if (hkCom.id >= [[[SlateConfig getInstance] bindings] count]) {
+  NSInteger hotkey_id = hkCom.id;
+  if (hotkey_id >= HYPER_ADDITIVE_ID) {
+    hotkey_id -= HYPER_ADDITIVE_ID;
+  }
+  
+  if (hotkey_id >= [[[SlateConfig getInstance] bindings] count]) {
     if (currentModalKey != nil) {
       if (hkCom.id == MODAL_ESCAPE_ID) {
         [self resetModalKey];
@@ -272,9 +351,9 @@ static EventHandlerRef modifiersEvent;
     return noErr;
   }
 
-  Binding *binding = [[[SlateConfig getInstance] bindings] objectAtIndex:hkCom.id];
+  Binding *binding = [[[SlateConfig getInstance] bindings] objectAtIndex:hotkey_id];
   if (binding) {
-    SlateLogger(@"Running Operation %@", [[[SlateConfig getInstance] bindings] objectAtIndex:hkCom.id]);
+    SlateLogger(@"Running Operation %@", [[[SlateConfig getInstance] bindings] objectAtIndex: hotkey_id]);
     if ([[binding op] isKindOfClass:[SwitchOperation class]]) {
       // makes sure that if switch is called immediately after opening slate we don't run into issues
       NSArray *currentApps = [[RunningApplications getInstance] apps];
@@ -290,7 +369,7 @@ static EventHandlerRef modifiersEvent;
     [binding doOperation];
     if (!(cmdTabBinding > 0 && [[[SlateConfig getInstance] bindings] objectAtIndex:cmdTabBinding] == binding) &&
         !(cmdShiftTabBinding > 0 && [[[SlateConfig getInstance] bindings] objectAtIndex:cmdShiftTabBinding] == binding) &&
-        ([binding repeat] || [[binding op] isKindOfClass:[SwitchOperation class]])) {
+        (/* [binding repeat] || */ [[binding op] isKindOfClass:[SwitchOperation class]])) {
       @synchronized(timerLock) {
         if (currentTimer != nil) {
           [currentTimer invalidate];
@@ -314,6 +393,7 @@ static EventHandlerRef modifiersEvent;
 }
 
 // Quartz Event Tap for reserved key bindings (CMD+Tab or CMD+Shift+Tab)
+// See also HandleHyperBindingsCallback for handling of hyper modifier bindings via a tap
 static const NSTimeInterval KEY_UP_BUFFER = -0.020;
 static BOOL keyUpSeen = YES;
 static NSDate *keyUpTime = nil;
@@ -389,6 +469,36 @@ CGEventRef EatAppSwitcherResetCallback(CGEventTapProxy proxy, CGEventType type, 
   }
 }
 
+static CFMachPortRef keyDownEventTapHH;
+
+CGEventRef HandleHyperBindingsCallback(CGEventTapProxy proxy, CGEventType type,  CGEventRef event, void *refcon) {
+  if (type == kCGEventTapDisabledByTimeout || type == kCGEventTapDisabledByUserInput) {
+    CGEventTapEnable(keyDownEventTapHH, true);
+    return NULL;
+  }
+  CGEventFlags flags = CGEventGetFlags(event);
+  int64_t keyCode = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
+  bool is_right_option_key = (flags & kCGEventFlagMaskAlternate && (flags & NX_DEVICERALTKEYMASK));
+  if (is_right_option_key) {
+
+    SlateLogger(@"RIGHT_OPTION KEY DOWN - FLAGS: %llu, KEYCODE: %lld", (uint64_t)flags, keyCode);
+    SlateAppDelegate *del = (__bridge SlateAppDelegate *)refcon;
+    EventHotKeyID myHotKeyID;
+      
+    NSString *key = KeyFromKeycodeFlags(keyCode, flags);
+    UInt32 hotkeyID = [[[del hyperKeycodesToId] objectForKey:key] intValue];
+    if (hotkeyID < HYPER_ADDITIVE_ID) {
+      SlateLogger(@"   non-hyper-binding -- continuing dispatch of event %u", (unsigned int)hotkeyID);
+      return event;
+    }
+    myHotKeyID.signature = *[[NSString stringWithFormat:@"hotkey%u",(unsigned int)hotkeyID] cStringUsingEncoding:NSASCIIStringEncoding];
+    myHotKeyID.id = hotkeyID;
+    [del activateBinding:myHotKeyID isRepeat:NO];
+    return NULL;
+  }
+  return event;
+}
+
 OSStatus OnHotKeyEvent(EventHandlerCallRef nextHandler, EventRef theEvent, void *userData) {
   @synchronized(timerLock) {
     if (currentTimer != nil) {
@@ -399,6 +509,11 @@ OSStatus OnHotKeyEvent(EventHandlerCallRef nextHandler, EventRef theEvent, void 
   if (![(__bridge id)userData isKindOfClass:[SlateAppDelegate class]]) return noErr;
   EventHotKeyID hkCom;
   GetEventParameter(theEvent, kEventParamDirectObject, typeEventHotKeyID, NULL, sizeof(hkCom), NULL, &hkCom);
+  if (hkCom.id >= HYPER_ADDITIVE_ID) { // > 40000 is reserved for hyper bindings
+    // these dispatch through EatAppSwitcherCallback rather than here.
+    SlateLogger(@"skipping activation of binding for hyper modifier within OnHotKeyEvent");
+    return noErr;
+  }
   return [(__bridge SlateAppDelegate *)userData activateBinding:hkCom isRepeat:NO];
 }
 
@@ -433,6 +548,7 @@ OSStatus OnModifiersChangedEvent(EventHandlerCallRef nextHandler, EventRef theEv
   return noErr;
 }
 
+
 - (void)applicationDidFinishLaunching:(NSNotification *)aNotification {
   if (cmdTabBinding > 0 || cmdShiftTabBinding > 0) {
     CFMachPortRef keyDownEventTap;
@@ -449,6 +565,14 @@ OSStatus OnModifiersChangedEvent(EventHandlerCallRef nextHandler, EventRef theEv
     CFRunLoopAddSource(CFRunLoopGetCurrent(), keyUpRunLoopSource, kCFRunLoopCommonModes);
     CGEventTapEnable(keyUpEventTap, true);
   }
+  if (hyperKeyBinding) {
+    keyDownEventTapHH =
+    CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap, 0, CGEventMaskBit(kCGEventKeyDown), HandleHyperBindingsCallback, (__bridge void *)self);
+    CFRunLoopSourceRef keyDownRunLoopSourceHH =
+        CFMachPortCreateRunLoopSource(kCFAllocatorDefault, keyDownEventTapHH, 0);
+    CFRunLoopAddSource(CFRunLoopGetCurrent(), keyDownRunLoopSourceHH, kCFRunLoopCommonModes);
+    CGEventTapEnable(keyDownEventTapHH, true);
+   }
 }
 
 - (void)setLaunchOnLoginItemStatus {
@@ -462,6 +586,7 @@ OSStatus OnModifiersChangedEvent(EventHandlerCallRef nextHandler, EventRef theEv
   currentHintOperation = nil;
   currentGridOperation = nil;
 
+  [self setHyperKeycodesToId:[NSMutableDictionary dictionary]];
   [self setModalHotKeyRefs:[NSMutableDictionary dictionary]];
   [self setModalIdToKey:[NSMutableDictionary dictionary]];
   [self setCurrentModalHotKeyRefs:[NSMutableArray array]];

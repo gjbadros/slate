@@ -104,6 +104,8 @@ static NSDictionary *dictionary = nil;
    return shiftKey;
   } else if ([mod isEqualToString:FUNCTION]) {
     return FUNCTION_KEY;
+  } else if ([mod isEqualToString:HYPER]) {
+    return HYPER_KEY;
   } else {
     SlateLogger(@"ERROR: Unrecognized modifier '%@'", mod);
     @throw([NSException exceptionWithName:@"Unrecognized Modifier" reason:[NSString stringWithFormat:@"Unrecognized modifier '%@'", mod] userInfo:nil]);

@@ -89,6 +89,8 @@
 }
 
 - (BOOL)doOperationWithAccessibilityWrapper:(AccessibilityWrapper *)aw screenWrapper:(ScreenWrapper *)sw {
+  static float offsets[] = { -0.02, 0.03, .10, .21, .35, .55, .75, .87, .94, .98, 1 };
+  static int c_offsets = sizeof(offsets)/sizeof(offsets[0]);
   BOOL success = NO;
   [self evalOptionsWithAccessibilityWrapper:aw screenWrapper:sw];
   NSPoint cTopLeft = [aw getCurrentTopLeft];
@@ -98,8 +100,15 @@
   success = [aw resizeWindow:nSize];
   NSSize realNewSize = [aw getCurrentSize];
   NSPoint nTopLeft = [self getTopLeftWithCurrentWindowRect:cWindowRect newSize:realNewSize screenWrapper:sw];
-  success = [aw moveWindow:nTopLeft] && success;
-  success = [aw resizeWindow:nSize] && success;
+  for (int i=0; (cTopLeft.x != nTopLeft.x || cTopLeft.y != nTopLeft.y)
+                    && i <= c_offsets; ++i) {
+    cTopLeft.x = offsets[i]*(nTopLeft.x - cTopLeft.x) + cTopLeft.x;
+    cTopLeft.y = offsets[i]*(nTopLeft.y - cTopLeft.y) + cTopLeft.y;
+    cSize.height = offsets[i]*(nSize.height - cSize.height) + cSize.height;
+    cSize.width = offsets[i]*(nSize.width - cSize.width) + cSize.width;
+    success = [aw moveWindow:cTopLeft] && success;
+    success = [aw resizeWindow:cSize] && success;
+  }
   return success;
 }
 
